@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	telemetry "git.d464.sh/adc/telemetry/pkg/bitswap"
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	bsgetter "github.com/ipfs/go-bitswap/internal/getter"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
@@ -131,6 +132,8 @@ type Session struct {
 	id    uint64
 
 	self peer.ID
+
+	telemetryState *telemetry.SessionTelemetryState
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -147,7 +150,8 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
+	self peer.ID,
+	bstelemetry *telemetry.BitswapTelemetry) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -169,6 +173,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		telemetryState:      telemetry.NewSessionTelemetryState(bstelemetry),
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -305,6 +310,7 @@ func (s *Session) run(ctx context.Context) {
 			case opReceive:
 				// Received blocks
 				s.handleReceive(oper.keys)
+				s.telemetryState.DiscoverySucceeded()
 			case opWant:
 				// Client wants blocks
 				s.wantBlocks(ctx, oper.keys)
@@ -324,6 +330,7 @@ func (s *Session) run(ctx context.Context) {
 		case <-s.idleTick.C:
 			// The session hasn't received blocks for a while, broadcast
 			s.broadcast(ctx, nil)
+			s.telemetryState.DiscoveryFailed()
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want
 			s.handlePeriodicSearch(ctx)
