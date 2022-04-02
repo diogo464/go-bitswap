@@ -4,7 +4,7 @@ replace git.d464.sh/adc/telemetry => ../../
 
 require (
 	git.d464.sh/adc/telemetry v0.0.0-00010101000000-000000000000
-	github.com/benbjohnson/clock v1.1.0
+	github.com/benbjohnson/clock v1.3.0
 	github.com/cskr/pubsub v1.0.2
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.0
@@ -33,7 +33,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.4.1
 	github.com/multiformats/go-multistream v0.2.2
 	github.com/stretchr/testify v1.7.0
-	go.uber.org/zap v1.19.1
+	go.uber.org/zap v1.21.0
 )
 
 go 1.16
