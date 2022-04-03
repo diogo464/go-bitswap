@@ -12,7 +12,6 @@ import (
 
 	delay "github.com/ipfs/go-ipfs-delay"
 
-	telemetry "git.d464.sh/adc/telemetry/pkg/bitswap"
 	deciface "github.com/ipfs/go-bitswap/decision"
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	"github.com/ipfs/go-bitswap/internal/decision"
@@ -230,8 +229,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	pm := bspm.New(ctx, peerQueueFactory, network.Self())
 	pqm := bspqm.New(ctx, network)
 
-	bstelemetry := telemetry.NewBitswapTelemetry()
-
 	sessionFactory := func(
 		sessctx context.Context,
 		sessmgr bssession.SessionManager,
@@ -244,7 +241,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
 		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, bstelemetry)
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -278,7 +275,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		engineTargetMessageSize:          defaults.BitswapEngineTargetMessageSize,
 		engineSetSendDontHaves:           true,
 		simulateDontHavesOnTimeout:       true,
-		Telemetry:                        bstelemetry,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -414,8 +410,6 @@ type Bitswap struct {
 
 	// an optional feature to accept / deny requests for blocks
 	peerBlockRequestFilter PeerBlockRequestFilter
-
-	Telemetry *telemetry.BitswapTelemetry
 }
 
 type counters struct {

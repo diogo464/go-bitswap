@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	telemetry "git.d464.sh/adc/telemetry/pkg/bitswap"
+	"git.d464.sh/adc/telemetry/pkg/measurements"
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	bsgetter "github.com/ipfs/go-bitswap/internal/getter"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
@@ -133,7 +133,7 @@ type Session struct {
 
 	self peer.ID
 
-	telemetryState *telemetry.SessionTelemetryState
+	telemetryState *measurements.SessionTelemetryState
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -150,8 +150,7 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID,
-	bstelemetry *telemetry.BitswapTelemetry) *Session {
+	self peer.ID) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -173,7 +172,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
-		telemetryState:      telemetry.NewSessionTelemetryState(bstelemetry),
+		telemetryState:      measurements.NewSessionTelemetryState(),
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
