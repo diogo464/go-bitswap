@@ -32,7 +32,7 @@ require (
 	github.com/libp2p/go-msgio v0.1.0
 	github.com/multiformats/go-multiaddr v0.4.1
 	github.com/multiformats/go-multistream v0.2.2
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.7.1
 	go.uber.org/zap v1.21.0
 )
 

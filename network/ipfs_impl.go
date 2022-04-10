@@ -342,6 +342,8 @@ func (bsnet *impl) SendMessage(
 		return err
 	}
 
+	atomic.AddUint64(&bsnet.stats.MessagesSent, 1)
+
 	return s.Close()
 }
 

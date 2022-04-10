@@ -3,6 +3,7 @@ package bitswap
 import (
 	"sort"
 
+	"github.com/ipfs/go-bitswap/network"
 	cid "github.com/ipfs/go-cid"
 )
 
@@ -45,4 +46,8 @@ func (bs *Bitswap) Stat() (*Stat, error) {
 	sort.Strings(st.Peers)
 
 	return st, nil
+}
+
+func (bs *Bitswap) NetworkStat() network.Stats {
+	return bs.network.Stats()
 }

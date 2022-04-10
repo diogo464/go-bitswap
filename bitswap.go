@@ -420,6 +420,7 @@ type counters struct {
 	dataSent       uint64
 	dataRecvd      uint64
 	messagesRecvd  uint64
+	messagesSent   uint64
 }
 
 // GetBlock attempts to retrieve a particular block from peers within the
