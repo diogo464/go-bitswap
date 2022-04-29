@@ -1,11 +1,11 @@
 module github.com/ipfs/go-bitswap
 
-replace git.d464.sh/adc/telemetry => ../../
+replace github.com/diogo464/telemetry => ../../
 
 require (
-	git.d464.sh/adc/telemetry v0.0.0-00010101000000-000000000000
 	github.com/benbjohnson/clock v1.3.0
 	github.com/cskr/pubsub v1.0.2
+	github.com/diogo464/telemetry v0.0.0-00010101000000-000000000000
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.0
 	github.com/ipfs/go-block-format v0.0.3
