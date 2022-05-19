@@ -1,5 +1,7 @@
 module github.com/ipfs/go-bitswap
 
+replace github.com/libp2p/go-libp2p => ../go-libp2p/
+
 replace github.com/diogo464/telemetry => ../../
 
 require (
