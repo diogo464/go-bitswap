@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	bitswap "github.com/ipfs/go-bitswap"
+	"github.com/ipfs/go-bitswap"
 	bsnet "github.com/ipfs/go-bitswap/network"
 	tn "github.com/ipfs/go-bitswap/testnet"
 	ds "github.com/ipfs/go-datastore"
@@ -12,9 +12,9 @@ import (
 	ds_sync "github.com/ipfs/go-datastore/sync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	delay "github.com/ipfs/go-ipfs-delay"
-	peer "github.com/libp2p/go-libp2p-core/peer"
-	p2ptestutil "github.com/libp2p/go-libp2p-netutil"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
+	p2ptestutil "github.com/libp2p/go-libp2p-testing/netutil"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 )
 
 // NewTestInstanceGenerator generates a new InstanceGenerator for the given
@@ -120,7 +120,7 @@ func NewInstance(ctx context.Context, net tn.Network, p tnet.Identity, netOption
 		panic(err.Error()) // FIXME perhaps change signature and return error.
 	}
 
-	bs := bitswap.New(ctx, adapter, bstore, bsOptions...).(*bitswap.Bitswap)
+	bs := bitswap.New(ctx, adapter, bstore, bsOptions...)
 
 	return Instance{
 		Adapter:         adapter,

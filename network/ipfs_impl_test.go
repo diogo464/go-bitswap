@@ -10,17 +10,18 @@ import (
 	bsmsg "github.com/ipfs/go-bitswap/message"
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	bsnet "github.com/ipfs/go-bitswap/network"
+	"github.com/ipfs/go-bitswap/network/internal"
 	tn "github.com/ipfs/go-bitswap/testnet"
 	ds "github.com/ipfs/go-datastore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	mockrouting "github.com/ipfs/go-ipfs-routing/mock"
 	"github.com/multiformats/go-multistream"
 
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
@@ -38,7 +39,8 @@ func newReceiver() *receiver {
 	return &receiver{
 		peers:           make(map[peer.ID]struct{}),
 		messageReceived: make(chan struct{}),
-		connectionEvent: make(chan bool, 1),
+		// Avoid blocking. 100 is good enough for tests.
+		connectionEvent: make(chan bool, 100),
 	}
 }
 
@@ -74,6 +76,7 @@ type ErrStream struct {
 	lk        sync.Mutex
 	err       error
 	timingOut bool
+	closed    bool
 }
 
 type ErrHost struct {
@@ -95,6 +98,14 @@ func (es *ErrStream) Write(b []byte) (int, error) {
 		return 0, context.DeadlineExceeded
 	}
 	return es.Stream.Write(b)
+}
+
+func (es *ErrStream) Close() error {
+	es.lk.Lock()
+	es.closed = true
+	es.lk.Unlock()
+
+	return es.Stream.Close()
 }
 
 func (eh *ErrHost) Connect(ctx context.Context, pi peer.AddrInfo) error {
@@ -156,7 +167,8 @@ func TestMessageSendAndReceive(t *testing.T) {
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
+	defer mn.Close()
 	mr := mockrouting.NewServer()
 	streamNet, err := tn.StreamNet(ctx, mn, mr)
 	if err != nil {
@@ -169,8 +181,10 @@ func TestMessageSendAndReceive(t *testing.T) {
 	bsnet2 := streamNet.Adapter(p2)
 	r1 := newReceiver()
 	r2 := newReceiver()
-	bsnet1.SetDelegate(r1)
-	bsnet2.SetDelegate(r2)
+	bsnet1.Start(r1)
+	t.Cleanup(bsnet1.Stop)
+	bsnet2.Start(r2)
+	t.Cleanup(bsnet2.Stop)
 
 	err = mn.LinkAll()
 	if err != nil {
@@ -257,7 +271,8 @@ func TestMessageSendAndReceive(t *testing.T) {
 
 func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *receiver, p2 tnet.Identity, r2 *receiver) (*ErrHost, bsnet.BitSwapNetwork, *ErrHost, bsnet.BitSwapNetwork, bsmsg.BitSwapMessage) {
 	// create network
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
+	defer mn.Close()
 	mr := mockrouting.NewServer()
 
 	// Host 1
@@ -268,7 +283,8 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	eh1 := &ErrHost{Host: h1}
 	routing1 := mr.ClientWithDatastore(context.TODO(), p1, ds.NewMapDatastore())
 	bsnet1 := bsnet.NewFromIpfsHost(eh1, routing1)
-	bsnet1.SetDelegate(r1)
+	bsnet1.Start(r1)
+	t.Cleanup(bsnet1.Stop)
 	if r1.listener != nil {
 		eh1.Network().Notify(r1.listener)
 	}
@@ -281,7 +297,8 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	eh2 := &ErrHost{Host: h2}
 	routing2 := mr.ClientWithDatastore(context.TODO(), p2, ds.NewMapDatastore())
 	bsnet2 := bsnet.NewFromIpfsHost(eh2, routing2)
-	bsnet2.SetDelegate(r2)
+	bsnet2.Start(r2)
+	t.Cleanup(bsnet2.Stop)
 	if r2.listener != nil {
 		eh2.Network().Notify(r2.listener)
 	}
@@ -434,7 +451,8 @@ func TestMessageSendNotSupportedResponse(t *testing.T) {
 
 func TestSupportsHave(t *testing.T) {
 	ctx := context.Background()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
+	defer mn.Close()
 	mr := mockrouting.NewServer()
 	streamNet, err := tn.StreamNet(ctx, mn, mr)
 	if err != nil {
@@ -454,28 +472,32 @@ func TestSupportsHave(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		p1 := tnet.RandIdentityOrFatal(t)
-		bsnet1 := streamNet.Adapter(p1)
-		bsnet1.SetDelegate(newReceiver())
+		t.Run(fmt.Sprintf("%s-%v", tc.proto, tc.expSupportsHave), func(t *testing.T) {
+			p1 := tnet.RandIdentityOrFatal(t)
+			bsnet1 := streamNet.Adapter(p1)
+			bsnet1.Start(newReceiver())
+			t.Cleanup(bsnet1.Stop)
 
-		p2 := tnet.RandIdentityOrFatal(t)
-		bsnet2 := streamNet.Adapter(p2, bsnet.SupportedProtocols([]protocol.ID{tc.proto}))
-		bsnet2.SetDelegate(newReceiver())
+			p2 := tnet.RandIdentityOrFatal(t)
+			bsnet2 := streamNet.Adapter(p2, bsnet.SupportedProtocols([]protocol.ID{tc.proto}))
+			bsnet2.Start(newReceiver())
+			t.Cleanup(bsnet2.Stop)
 
-		err = mn.LinkAll()
-		if err != nil {
-			t.Fatal(err)
-		}
+			err = mn.LinkAll()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		senderCurrent, err := bsnet1.NewMessageSender(ctx, p2.ID(), &bsnet.MessageSenderOpts{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer senderCurrent.Close()
+			senderCurrent, err := bsnet1.NewMessageSender(ctx, p2.ID(), &bsnet.MessageSenderOpts{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer senderCurrent.Close()
 
-		if senderCurrent.SupportsHave() != tc.expSupportsHave {
-			t.Fatal("Expected sender HAVE message support", tc.proto, tc.expSupportsHave)
-		}
+			if senderCurrent.SupportsHave() != tc.expSupportsHave {
+				t.Fatal("Expected sender HAVE message support", tc.proto, tc.expSupportsHave)
+			}
+		})
 	}
 }
 
@@ -488,24 +510,7 @@ func testNetworkCounters(t *testing.T, n1 int, n2 int) {
 	p2 := tnet.RandIdentityOrFatal(t)
 	r2 := newReceiver()
 
-	var wg1, wg2 sync.WaitGroup
-	r1.listener = &network.NotifyBundle{
-		OpenedStreamF: func(n network.Network, s network.Stream) {
-			wg1.Add(1)
-		},
-		ClosedStreamF: func(n network.Network, s network.Stream) {
-			wg1.Done()
-		},
-	}
-	r2.listener = &network.NotifyBundle{
-		OpenedStreamF: func(n network.Network, s network.Stream) {
-			wg2.Add(1)
-		},
-		ClosedStreamF: func(n network.Network, s network.Stream) {
-			wg2.Done()
-		},
-	}
-	_, bsnet1, _, bsnet2, msg := prepareNetwork(t, ctx, p1, r1, p2, r2)
+	h1, bsnet1, h2, bsnet2, msg := prepareNetwork(t, ctx, p1, r1, p2, r2)
 
 	for n := 0; n < n1; n++ {
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -570,12 +575,75 @@ func testNetworkCounters(t *testing.T, n1 int, n2 int) {
 	ctxto, cancelto := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelto()
 	ctxwait, cancelwait := context.WithCancel(ctx)
-	defer cancelwait()
 	go func() {
-		wg1.Wait()
-		wg2.Wait()
+		// Wait until all streams are closed
+		throttler := time.NewTicker(time.Millisecond * 5)
+		defer throttler.Stop()
+		for {
+			h1.lk.Lock()
+			var done bool
+			for _, s := range h1.streams {
+				s.lk.Lock()
+				closed := s.closed
+				closed = closed || s.err != nil
+				s.lk.Unlock()
+				if closed {
+					continue
+				}
+				pid := s.Protocol()
+				for _, v := range internal.DefaultProtocols {
+					if pid == v {
+						goto ElseH1
+					}
+				}
+			}
+			done = true
+		ElseH1:
+			h1.lk.Unlock()
+			if done {
+				break
+			}
+			select {
+			case <-ctxto.Done():
+				return
+			case <-throttler.C:
+			}
+		}
+
+		for {
+			h2.lk.Lock()
+			var done bool
+			for _, s := range h2.streams {
+				s.lk.Lock()
+				closed := s.closed
+				closed = closed || s.err != nil
+				s.lk.Unlock()
+				if closed {
+					continue
+				}
+				pid := s.Protocol()
+				for _, v := range internal.DefaultProtocols {
+					if pid == v {
+						goto ElseH2
+					}
+				}
+			}
+			done = true
+		ElseH2:
+			h2.lk.Unlock()
+			if done {
+				break
+			}
+			select {
+			case <-ctxto.Done():
+				return
+			case <-throttler.C:
+			}
+		}
+
 		cancelwait()
 	}()
+
 	select {
 	case <-ctxto.Done():
 		t.Fatal("network streams closing timed out")
