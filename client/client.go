@@ -19,6 +19,7 @@ import (
 	"github.com/ipfs/go-bitswap/client/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/client/internal/peermanager"
 	bspqm "github.com/ipfs/go-bitswap/client/internal/providerquerymanager"
+	"github.com/ipfs/go-bitswap/client/internal/session"
 	bssession "github.com/ipfs/go-bitswap/client/internal/session"
 	bssim "github.com/ipfs/go-bitswap/client/internal/sessioninterestmanager"
 	bssm "github.com/ipfs/go-bitswap/client/internal/sessionmanager"
@@ -134,16 +135,20 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		notif notifications.PubSub,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
-		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
+		self peer.ID,
+		discoveryObserver session.DiscoveryObserver,
+	) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, discoveryObserver)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
 
-	bs = &Client{
+	bs = new(Client)
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), &clientDiscoveryObserver{client: bs})
+
+	*bs = Client{
 		blockstore:                 bstore,
 		network:                    network,
 		process:                    px,
@@ -230,11 +235,13 @@ type Client struct {
 }
 
 type counters struct {
-	blocksRecvd    uint64
-	dupBlocksRecvd uint64
-	dupDataRecvd   uint64
-	dataRecvd      uint64
-	messagesRecvd  uint64
+	blocksRecvd      uint64
+	dupBlocksRecvd   uint64
+	dupDataRecvd     uint64
+	dataRecvd        uint64
+	messagesRecvd    uint64
+	discoverySuccess uint64
+	discoveryFailure uint64
 }
 
 // GetBlock attempts to retrieve a particular block from peers within the
@@ -476,4 +483,24 @@ func (bs *Client) NewSession(ctx context.Context) exchange.Fetcher {
 	ctx, span := internal.StartSpan(ctx, "NewSession")
 	defer span.End()
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+}
+
+var _ (session.DiscoveryObserver) = (*clientDiscoveryObserver)(nil)
+
+type clientDiscoveryObserver struct {
+	client *Client
+}
+
+// DiscoveryFailure implements session.DiscoveryObserver
+func (o *clientDiscoveryObserver) DiscoveryFailure() {
+	o.client.counterLk.Lock()
+	defer o.client.counterLk.Unlock()
+	o.client.counters.discoverySuccess += 1
+}
+
+// DiscoverySuccess implements session.DiscoveryObserver
+func (o *clientDiscoveryObserver) DiscoverySuccess() {
+	o.client.counterLk.Lock()
+	defer o.client.counterLk.Unlock()
+	o.client.counters.discoveryFailure += 1
 }

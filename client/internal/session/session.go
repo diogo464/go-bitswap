@@ -75,6 +75,11 @@ type ProviderFinder interface {
 	FindProvidersAsync(ctx context.Context, k cid.Cid) <-chan peer.ID
 }
 
+type DiscoveryObserver interface {
+	DiscoverySuccess()
+	DiscoveryFailure()
+}
+
 // opType is the kind of operation that is being processed by the event loop
 type opType int
 
@@ -130,6 +135,8 @@ type Session struct {
 	id    uint64
 
 	self peer.ID
+
+	discoveryObserver DiscoveryObserver
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -146,7 +153,8 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
+	self peer.ID,
+	discoveryObserver DiscoveryObserver) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -167,6 +175,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		discoveryObserver:   discoveryObserver,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -299,6 +308,7 @@ func (s *Session) run(ctx context.Context) {
 
 	s.idleTick = time.NewTimer(s.initialSearchDelay)
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
+	discoveryComplete := false
 	for {
 		select {
 		case oper := <-s.incoming:
@@ -306,6 +316,10 @@ func (s *Session) run(ctx context.Context) {
 			case opReceive:
 				// Received blocks
 				s.handleReceive(oper.keys)
+				if !discoveryComplete {
+					discoveryComplete = true
+					s.discoveryObserver.DiscoverySuccess()
+				}
 			case opWant:
 				// Client wants blocks
 				s.wantBlocks(ctx, oper.keys)
@@ -325,6 +339,10 @@ func (s *Session) run(ctx context.Context) {
 		case <-s.idleTick.C:
 			// The session hasn't received blocks for a while, broadcast
 			s.broadcast(ctx, nil)
+			if !discoveryComplete {
+				discoveryComplete = true
+				s.discoveryObserver.DiscoveryFailure()
+			}
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want
 			s.handlePeriodicSearch(ctx)

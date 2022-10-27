@@ -111,6 +111,8 @@ type Stat struct {
 	DupBlksReceived  uint64
 	DupDataReceived  uint64
 	MessagesReceived uint64
+	DiscoverySuccess uint64
+	DiscoveryFailure uint64
 	BlocksSent       uint64
 	DataSent         uint64
 	ProvideBufLen    int
@@ -133,6 +135,8 @@ func (bs *Bitswap) Stat() (*Stat, error) {
 		DupBlksReceived:  cs.DupBlksReceived,
 		DupDataReceived:  cs.DupDataReceived,
 		MessagesReceived: cs.MessagesReceived,
+		DiscoverySuccess: cs.DiscoverySuccess,
+		DiscoveryFailure: cs.DiscoveryFailure,
 		Peers:            ss.Peers,
 		BlocksSent:       ss.BlocksSent,
 		DataSent:         ss.DataSent,
