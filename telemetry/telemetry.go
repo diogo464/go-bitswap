@@ -78,7 +78,7 @@ func registerMetrics(t telemetry.Telemetry, bs *bitswap.Bitswap) error {
 	if discoverySuccess, err = m.AsyncInt64().Counter(
 		"discovery_success",
 		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number times discovery succeeded"),
+		instrument.WithDescription("Total number of times discovery succeeded"),
 	); err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func registerMetrics(t telemetry.Telemetry, bs *bitswap.Bitswap) error {
 	if discoveryFailure, err = m.AsyncInt64().Counter(
 		"discovery_failure",
 		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number times discovery failed"),
+		instrument.WithDescription("Total number of times discovery failed"),
 	); err != nil {
 		return err
 	}
