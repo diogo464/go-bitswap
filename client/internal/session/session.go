@@ -75,8 +75,9 @@ type ProviderFinder interface {
 	FindProvidersAsync(ctx context.Context, k cid.Cid) <-chan peer.ID
 }
 
-type DiscoveryObserver interface {
-	DiscoverySuccess()
+type SessionObserver interface {
+	// Time it took to receive the first block
+	DiscoverySuccess(ttfb time.Duration)
 	DiscoveryFailure()
 }
 
@@ -136,7 +137,7 @@ type Session struct {
 
 	self peer.ID
 
-	discoveryObserver DiscoveryObserver
+	sessionObserver SessionObserver
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -154,7 +155,7 @@ func New(
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
 	self peer.ID,
-	discoveryObserver DiscoveryObserver) *Session {
+	sessionObserver SessionObserver) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -175,7 +176,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
-		discoveryObserver:   discoveryObserver,
+		sessionObserver:     sessionObserver,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -309,6 +310,7 @@ func (s *Session) run(ctx context.Context) {
 	s.idleTick = time.NewTimer(s.initialSearchDelay)
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
 	discoveryComplete := false
+	discoveryStart := time.Now()
 	for {
 		select {
 		case oper := <-s.incoming:
@@ -317,8 +319,9 @@ func (s *Session) run(ctx context.Context) {
 				// Received blocks
 				s.handleReceive(oper.keys)
 				if !discoveryComplete {
+					ttfb := time.Since(discoveryStart)
 					discoveryComplete = true
-					s.discoveryObserver.DiscoverySuccess()
+					s.sessionObserver.DiscoverySuccess(ttfb)
 				}
 			case opWant:
 				// Client wants blocks
@@ -341,7 +344,7 @@ func (s *Session) run(ctx context.Context) {
 			s.broadcast(ctx, nil)
 			if !discoveryComplete {
 				discoveryComplete = true
-				s.discoveryObserver.DiscoveryFailure()
+				s.sessionObserver.DiscoveryFailure()
 			}
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want

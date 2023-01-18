@@ -12,6 +12,7 @@ import (
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/client/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/client/internal/peermanager"
+	"github.com/ipfs/go-bitswap/client/internal/session"
 	bssession "github.com/ipfs/go-bitswap/client/internal/session"
 	bssim "github.com/ipfs/go-bitswap/client/internal/sessioninterestmanager"
 	"github.com/ipfs/go-bitswap/internal/testutil"
@@ -80,6 +81,13 @@ func (fpm *fakePeerManager) cancelled() []cid.Cid {
 	return fpm.cancels
 }
 
+var _ session.SessionObserver = (*fakeSessionObserver)(nil)
+
+type fakeSessionObserver struct{}
+
+func (*fakeSessionObserver) DiscoveryFailure()                   {}
+func (*fakeSessionObserver) DiscoverySuccess(ttfb time.Duration) {}
+
 func sessionFactory(ctx context.Context,
 	sm bssession.SessionManager,
 	id uint64,
@@ -90,7 +98,8 @@ func sessionFactory(ctx context.Context,
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session {
+	self peer.ID,
+	observer session.SessionObserver) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -117,7 +126,7 @@ func TestReceiveFrom(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", &fakeSessionObserver{})
 
 	p := peer.ID(fmt.Sprint(123))
 	block := blocks.NewBlock([]byte("block"))
@@ -164,7 +173,7 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", &fakeSessionObserver{})
 
 	p := peer.ID(fmt.Sprint(123))
 	block := blocks.NewBlock([]byte("block"))
@@ -198,7 +207,7 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", &fakeSessionObserver{})
 
 	p := peer.ID(fmt.Sprint(123))
 	block := blocks.NewBlock([]byte("block"))
@@ -234,7 +243,7 @@ func TestShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", &fakeSessionObserver{})
 
 	p := peer.ID(fmt.Sprint(123))
 	block := blocks.NewBlock([]byte("block"))

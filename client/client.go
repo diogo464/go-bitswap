@@ -136,9 +136,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
 		self peer.ID,
-		discoveryObserver session.DiscoveryObserver,
+		sessionObserver session.SessionObserver,
 	) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, discoveryObserver)
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, sessionObserver)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -146,7 +146,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	notif := notifications.New()
 
 	bs = new(Client)
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), &clientDiscoveryObserver{client: bs})
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), &clientSessionObserver{client: bs})
 
 	*bs = Client{
 		blockstore:                 bstore,
@@ -485,21 +485,21 @@ func (bs *Client) NewSession(ctx context.Context) exchange.Fetcher {
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
 }
 
-var _ (session.DiscoveryObserver) = (*clientDiscoveryObserver)(nil)
+var _ (session.SessionObserver) = (*clientSessionObserver)(nil)
 
-type clientDiscoveryObserver struct {
+type clientSessionObserver struct {
 	client *Client
 }
 
-// DiscoveryFailure implements session.DiscoveryObserver
-func (o *clientDiscoveryObserver) DiscoveryFailure() {
+// DiscoveryFailure implements session.SessionObserver
+func (o *clientSessionObserver) DiscoveryFailure() {
 	o.client.counterLk.Lock()
 	defer o.client.counterLk.Unlock()
 	o.client.counters.discoverySuccess += 1
 }
 
-// DiscoverySuccess implements session.DiscoveryObserver
-func (o *clientDiscoveryObserver) DiscoverySuccess() {
+// DiscoverySuccess implements session.SessionObserver
+func (o *clientSessionObserver) DiscoverySuccess(ttfb time.Duration) {
 	o.client.counterLk.Lock()
 	defer o.client.counterLk.Unlock()
 	o.client.counters.discoveryFailure += 1
