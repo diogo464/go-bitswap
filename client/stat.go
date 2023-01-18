@@ -12,8 +12,6 @@ type Stat struct {
 	DupBlksReceived  uint64
 	DupDataReceived  uint64
 	MessagesReceived uint64
-	DiscoverySuccess uint64
-	DiscoveryFailure uint64
 }
 
 // Stat returns aggregated statistics about bitswap operations
@@ -25,8 +23,6 @@ func (bs *Client) Stat() (st Stat, err error) {
 	st.DupDataReceived = c.dupDataRecvd
 	st.DataReceived = c.dataRecvd
 	st.MessagesReceived = c.messagesRecvd
-	st.DiscoverySuccess = c.discoverySuccess
-	st.DiscoveryFailure = c.discoveryFailure
 	bs.counterLk.Unlock()
 	st.Wantlist = bs.GetWantlist()
 

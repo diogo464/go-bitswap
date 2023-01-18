@@ -11,6 +11,7 @@ import (
 	"github.com/ipfs/go-bitswap/server"
 	"github.com/ipfs/go-bitswap/tracer"
 	"github.com/ipfs/go-metrics-interface"
+	"go.opentelemetry.io/otel/metric"
 
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -52,8 +53,9 @@ type Bitswap struct {
 	*client.Client
 	*server.Server
 
-	tracer tracer.Tracer
-	net    network.BitSwapNetwork
+	tracer        tracer.Tracer
+	meterProvider metric.MeterProvider
+	net           network.BitSwapNetwork
 }
 
 func New(ctx context.Context, net network.BitSwapNetwork, bstore blockstore.Blockstore, options ...Option) *Bitswap {
@@ -81,6 +83,11 @@ func New(ctx context.Context, net network.BitSwapNetwork, bstore blockstore.Bloc
 		var tracer tracer.Tracer = nopReceiveTracer{bs.tracer}
 		clientOptions = append(clientOptions, client.WithTracer(tracer))
 		serverOptions = append(serverOptions, server.WithTracer(tracer))
+	}
+
+	if bs.meterProvider != nil {
+		clientOptions = append(clientOptions, client.WithMeterProvider(bs.meterProvider))
+		serverOptions = append(serverOptions, server.WithMeterProvider(bs.meterProvider))
 	}
 
 	if HasBlockBufferSize != defaults.HasBlockBufferSize {
@@ -135,8 +142,6 @@ func (bs *Bitswap) Stat() (*Stat, error) {
 		DupBlksReceived:  cs.DupBlksReceived,
 		DupDataReceived:  cs.DupDataReceived,
 		MessagesReceived: cs.MessagesReceived,
-		DiscoverySuccess: cs.DiscoverySuccess,
-		DiscoveryFailure: cs.DiscoveryFailure,
 		Peers:            ss.Peers,
 		BlocksSent:       ss.BlocksSent,
 		DataSent:         ss.DataSent,

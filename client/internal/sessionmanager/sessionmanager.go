@@ -9,12 +9,12 @@ import (
 	cid "github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ipfs/go-bitswap/client/internal"
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/client/internal/notifications"
-	"github.com/ipfs/go-bitswap/client/internal/session"
 	bssession "github.com/ipfs/go-bitswap/client/internal/session"
 	bssim "github.com/ipfs/go-bitswap/client/internal/sessioninterestmanager"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
@@ -42,7 +42,7 @@ type SessionFactory func(
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
 	self peer.ID,
-	observer session.SessionObserver) Session
+	meterProvider metric.MeterProvider) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -66,13 +66,13 @@ type SessionManager struct {
 	sessIDLk sync.Mutex
 	sessID   uint64
 
-	self            peer.ID
-	sessionObserver session.SessionObserver
+	self          peer.ID
+	meterProvider metric.MeterProvider
 }
 
 // New creates a new SessionManager.
 func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestManager *bssim.SessionInterestManager, peerManagerFactory PeerManagerFactory,
-	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID, sessionObserver session.SessionObserver) *SessionManager {
+	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID, meterProvider metric.MeterProvider) *SessionManager {
 
 	return &SessionManager{
 		ctx:                    ctx,
@@ -84,7 +84,7 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 		notif:                  notif,
 		sessions:               make(map[uint64]Session),
 		self:                   self,
-		sessionObserver:        sessionObserver,
+		meterProvider:          meterProvider,
 	}
 }
 
@@ -99,7 +99,7 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 	defer span.End()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, sm.sessionObserver)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, sm.meterProvider)
 
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown

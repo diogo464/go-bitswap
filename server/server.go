@@ -19,10 +19,14 @@ import (
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	logging "github.com/ipfs/go-log"
-	"github.com/ipfs/go-metrics-interface"
+	gometrics "github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
+	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 )
 
@@ -36,8 +40,8 @@ const provideWorkerMax = 6
 type Option func(*Server)
 
 type Server struct {
-	sentHistogram     metrics.Histogram
-	sendTimeHistogram metrics.Histogram
+	sentHistogram     gometrics.Histogram
+	sendTimeHistogram gometrics.Histogram
 
 	// the engine is the bit of logic that decides who to send which blocks to
 	engine *decision.Engine
@@ -49,8 +53,10 @@ type Server struct {
 	tracer tracer.Tracer
 
 	// Counters for various statistics
-	counterLk sync.Mutex
-	counters  Stat
+	meterProvider metric.MeterProvider
+	metrics       *metrics
+	counterLk     sync.Mutex
+	counters      Stat
 
 	// the total number of simultaneous threads sending outgoing messages
 	taskWorkerCount int
@@ -71,6 +77,12 @@ type Server struct {
 	hasBlockBufferSize int
 	// whether or not to make provide announcements
 	provideEnabled bool
+}
+
+type metrics struct {
+	// Async
+	blocksSent asyncint64.Counter
+	dataSent   asyncint64.Counter
 }
 
 func New(ctx context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Blockstore, options ...Option) *Server {
@@ -108,6 +120,11 @@ func New(ctx context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Bl
 		s.engineOptions...,
 	)
 	s.engineOptions = nil
+
+	if s.meterProvider == nil {
+		s.meterProvider = metric.NewNoopMeterProvider()
+	}
+	s.setupMetrics()
 
 	s.startWorkers(ctx, px)
 
@@ -218,6 +235,59 @@ func HasBlockBufferSize(count int) Option {
 	return func(bs *Server) {
 		bs.hasBlockBufferSize = count
 	}
+}
+
+func WithMeterProvider(provider metric.MeterProvider) Option {
+	return func(bs *Server) {
+		bs.meterProvider = provider
+	}
+}
+
+func (bs *Server) setupMetrics() error {
+	var (
+		err error
+
+		blocksSent asyncint64.Counter
+		dataSent   asyncint64.Counter
+	)
+
+	m := bs.meterProvider.Meter("libp2p.io/bitswap/server")
+
+	if blocksSent, err = m.AsyncInt64().Counter(
+		"blocks_sent",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of blocks sent"),
+	); err != nil {
+		return err
+	}
+
+	if dataSent, err = m.AsyncInt64().Counter(
+		"data_sent",
+		instrument.WithUnit(unit.Bytes),
+		instrument.WithDescription("Total number of data bytes sent"),
+	); err != nil {
+		return err
+	}
+
+	m.RegisterCallback([]instrument.Asynchronous{
+		blocksSent,
+		dataSent,
+	}, func(ctx context.Context) {
+		stat, err := bs.Stat()
+		if err != nil {
+			log.Errorf("failed to get bitswap stats: %s", err)
+		}
+
+		blocksSent.Observe(ctx, int64(stat.BlocksSent))
+		dataSent.Observe(ctx, int64(stat.DataSent))
+	})
+
+	bs.metrics = &metrics{
+		blocksSent: blocksSent,
+		dataSent:   dataSent,
+	}
+
+	return nil
 }
 
 // WantlistForPeer returns the currently understood list of blocks requested by a

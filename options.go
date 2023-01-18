@@ -7,6 +7,7 @@ import (
 	"github.com/ipfs/go-bitswap/server"
 	"github.com/ipfs/go-bitswap/tracer"
 	delay "github.com/ipfs/go-ipfs-delay"
+	"go.opentelemetry.io/otel/metric"
 )
 
 type option func(*Bitswap)
@@ -74,6 +75,14 @@ func WithTracer(tap tracer.Tracer) Option {
 	return Option{
 		option(func(bs *Bitswap) {
 			bs.tracer = tap
+		}),
+	}
+}
+
+func WithMeterProvider(provider metric.MeterProvider) Option {
+	return Option{
+		option(func(bs *Bitswap) {
+			bs.meterProvider = provider
 		}),
 	}
 }

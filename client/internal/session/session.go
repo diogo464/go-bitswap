@@ -15,6 +15,11 @@ import (
 	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p/core/peer"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/instrument/syncfloat64"
+	"go.opentelemetry.io/otel/metric/instrument/syncint64"
+	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 )
 
@@ -75,12 +80,6 @@ type ProviderFinder interface {
 	FindProvidersAsync(ctx context.Context, k cid.Cid) <-chan peer.ID
 }
 
-type SessionObserver interface {
-	// Time it took to receive the first block
-	DiscoverySuccess(ttfb time.Duration)
-	DiscoveryFailure()
-}
-
 // opType is the kind of operation that is being processed by the event loop
 type opType int
 
@@ -137,7 +136,14 @@ type Session struct {
 
 	self peer.ID
 
-	sessionObserver SessionObserver
+	meterProvider metric.MeterProvider
+	metrics       *metrics
+}
+
+type metrics struct {
+	discoverySuccess syncint64.Counter
+	discoveryFailure syncint64.Counter
+	timeToFirstBlock syncfloat64.Histogram
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -155,7 +161,7 @@ func New(
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
 	self peer.ID,
-	sessionObserver SessionObserver) *Session {
+	meterProvider metric.MeterProvider) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -176,13 +182,58 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
-		sessionObserver:     sessionObserver,
+		meterProvider:       meterProvider,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
+	s.setupMetrics()
 
 	go s.run(ctx)
 
 	return s
+}
+
+func (s *Session) setupMetrics() error {
+	var (
+		err error = nil
+
+		discoverySuccess syncint64.Counter
+		discoveryFailure syncint64.Counter
+		timeToFirstBlock syncfloat64.Histogram
+	)
+
+	m := s.meterProvider.Meter("libp2p.io/bitswap/session")
+
+	if discoverySuccess, err = m.SyncInt64().Counter(
+		"discovery_success",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of times discovery succeeded"),
+	); err != nil {
+		return err
+	}
+
+	if discoveryFailure, err = m.SyncInt64().Counter(
+		"discovery_failure",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of times discovery failed"),
+	); err != nil {
+		return err
+	}
+
+	if timeToFirstBlock, err = m.SyncFloat64().Histogram(
+		"time_to_first_block",
+		instrument.WithUnit(unit.Unit("s")),
+		instrument.WithDescription("Time to first block"),
+	); err != nil {
+		return err
+	}
+
+	s.metrics = &metrics{
+		discoverySuccess: discoverySuccess,
+		discoveryFailure: discoveryFailure,
+		timeToFirstBlock: timeToFirstBlock,
+	}
+
+	return nil
 }
 
 func (s *Session) ID() uint64 {
@@ -321,7 +372,8 @@ func (s *Session) run(ctx context.Context) {
 				if !discoveryComplete {
 					ttfb := time.Since(discoveryStart)
 					discoveryComplete = true
-					s.sessionObserver.DiscoverySuccess(ttfb)
+					s.metrics.discoverySuccess.Add(context.TODO(), 1)
+					s.metrics.timeToFirstBlock.Record(context.TODO(), ttfb.Seconds())
 				}
 			case opWant:
 				// Client wants blocks
@@ -344,7 +396,7 @@ func (s *Session) run(ctx context.Context) {
 			s.broadcast(ctx, nil)
 			if !discoveryComplete {
 				discoveryComplete = true
-				s.sessionObserver.DiscoveryFailure()
+				s.metrics.discoveryFailure.Add(context.TODO(), 1)
 			}
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want

@@ -11,6 +11,10 @@ import (
 
 	delay "github.com/ipfs/go-ipfs-delay"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
+	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/trace"
 
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
@@ -19,7 +23,6 @@ import (
 	"github.com/ipfs/go-bitswap/client/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/client/internal/peermanager"
 	bspqm "github.com/ipfs/go-bitswap/client/internal/providerquerymanager"
-	"github.com/ipfs/go-bitswap/client/internal/session"
 	bssession "github.com/ipfs/go-bitswap/client/internal/session"
 	bssim "github.com/ipfs/go-bitswap/client/internal/sessioninterestmanager"
 	bssm "github.com/ipfs/go-bitswap/client/internal/sessionmanager"
@@ -35,7 +38,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	logging "github.com/ipfs/go-log"
-	"github.com/ipfs/go-metrics-interface"
+	gometrics "github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -79,6 +82,12 @@ func WithTracer(tap tracer.Tracer) Option {
 func WithBlockReceivedNotifier(brn BlockReceivedNotifier) Option {
 	return func(bs *Client) {
 		bs.blockReceivedNotifier = brn
+	}
+}
+
+func WithMeterProvider(provider metric.MeterProvider) Option {
+	return func(bs *Client) {
+		bs.meterProvider = provider
 	}
 }
 
@@ -136,9 +145,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
 		self peer.ID,
-		sessionObserver session.SessionObserver,
+		meterProvider metric.MeterProvider,
 	) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, sessionObserver)
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, meterProvider)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -146,7 +155,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	notif := notifications.New()
 
 	bs = new(Client)
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), &clientSessionObserver{client: bs})
 
 	*bs = Client{
 		blockstore:                 bstore,
@@ -154,7 +162,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		process:                    px,
 		pm:                         pm,
 		pqm:                        pqm,
-		sm:                         sm,
 		sim:                        sim,
 		notif:                      notif,
 		counters:                   new(counters),
@@ -170,6 +177,15 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		option(bs)
 	}
 
+	if bs.meterProvider == nil {
+		bs.meterProvider = metric.NewNoopMeterProvider()
+	}
+	err := bs.setupMetrics()
+	if err != nil {
+		log.Errorf("failed to setup metrics: %s", err)
+	}
+
+	bs.sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), bs.meterProvider)
 	bs.pqm.Startup()
 
 	// bind the context and process.
@@ -209,8 +225,10 @@ type Client struct {
 	counters  *counters
 
 	// Metrics interface metrics
-	dupMetric metrics.Histogram
-	allMetric metrics.Histogram
+	meterProvider metric.MeterProvider
+	metrics       *metrics
+	dupMetric     gometrics.Histogram
+	allMetric     gometrics.Histogram
 
 	// External statistics interface
 	tracer tracer.Tracer
@@ -242,6 +260,101 @@ type counters struct {
 	messagesRecvd    uint64
 	discoverySuccess uint64
 	discoveryFailure uint64
+}
+
+type metrics struct {
+	// Async
+	blocksRecvd      asyncint64.Counter
+	dupBlocksRecvd   asyncint64.Counter
+	dupDataRecvd     asyncint64.Counter
+	dataRecvd        asyncint64.Counter
+	messagesRecvd    asyncint64.Counter
+	discoverySuccess asyncint64.Counter
+	discoveryFailure asyncint64.Counter
+}
+
+func (bs *Client) setupMetrics() error {
+	var (
+		err error
+
+		blocksReceived    asyncint64.Counter
+		dataReceived      asyncint64.Counter
+		dupBlocksReceived asyncint64.Counter
+		dupDataReceived   asyncint64.Counter
+		messagesReceived  asyncint64.Counter
+	)
+
+	m := bs.meterProvider.Meter("libp2p.io/bitswap/client")
+
+	if blocksReceived, err = m.AsyncInt64().Counter(
+		"blocks_received",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of received blocks"),
+	); err != nil {
+		return err
+	}
+
+	if dataReceived, err = m.AsyncInt64().Counter(
+		"data_received",
+		instrument.WithUnit(unit.Bytes),
+		instrument.WithDescription("Total number of data bytes received"),
+	); err != nil {
+		return err
+	}
+
+	if dupBlocksReceived, err = m.AsyncInt64().Counter(
+		"dup_blocks_received",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of duplicate blocks received"),
+	); err != nil {
+		return err
+	}
+
+	if dupDataReceived, err = m.AsyncInt64().Counter(
+		"dup_data_received",
+		instrument.WithUnit(unit.Bytes),
+		instrument.WithDescription("Total number of duplicate data bytes received"),
+	); err != nil {
+		return err
+	}
+
+	if messagesReceived, err = m.AsyncInt64().Counter(
+		"messages_received",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("Total number of messages received"),
+	); err != nil {
+		return err
+	}
+
+	m.RegisterCallback([]instrument.Asynchronous{
+		blocksReceived,
+		dataReceived,
+		dupBlocksReceived,
+		dupDataReceived,
+		messagesReceived,
+	}, func(ctx context.Context) {
+		stat, err := bs.Stat()
+		if err != nil {
+			log.Errorf("bitswap.Stat() failed", "error", err)
+			return
+		}
+
+		blocksReceived.Observe(ctx, int64(stat.BlocksReceived))
+		dataReceived.Observe(ctx, int64(stat.DataReceived))
+		dupBlocksReceived.Observe(ctx, int64(stat.DupBlksReceived))
+		dupDataReceived.Observe(ctx, int64(stat.DupDataReceived))
+		messagesReceived.Observe(ctx, int64(stat.MessagesReceived))
+	})
+
+	bs.metrics = &metrics{
+		blocksRecvd:    blocksReceived,
+		dataRecvd:      dataReceived,
+		dupBlocksRecvd: dupBlocksReceived,
+		dupDataRecvd:   dupDataReceived,
+		messagesRecvd:  messagesReceived,
+	}
+
+	return nil
 }
 
 // GetBlock attempts to retrieve a particular block from peers within the
@@ -483,24 +596,4 @@ func (bs *Client) NewSession(ctx context.Context) exchange.Fetcher {
 	ctx, span := internal.StartSpan(ctx, "NewSession")
 	defer span.End()
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
-}
-
-var _ (session.SessionObserver) = (*clientSessionObserver)(nil)
-
-type clientSessionObserver struct {
-	client *Client
-}
-
-// DiscoveryFailure implements session.SessionObserver
-func (o *clientSessionObserver) DiscoveryFailure() {
-	o.client.counterLk.Lock()
-	defer o.client.counterLk.Unlock()
-	o.client.counters.discoverySuccess += 1
-}
-
-// DiscoverySuccess implements session.SessionObserver
-func (o *clientSessionObserver) DiscoverySuccess(ttfb time.Duration) {
-	o.client.counterLk.Lock()
-	defer o.client.counterLk.Unlock()
-	o.client.counters.discoveryFailure += 1
 }
