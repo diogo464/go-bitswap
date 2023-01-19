@@ -154,9 +154,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	}
 	notif := notifications.New()
 
-	bs = new(Client)
-
-	*bs = Client{
+	bs = &Client{
 		blockstore:                 bstore,
 		network:                    network,
 		process:                    px,
@@ -180,13 +178,15 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	if bs.meterProvider == nil {
 		bs.meterProvider = metric.NewNoopMeterProvider()
 	}
+
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), bs.meterProvider)
+	bs.sm = sm
+	bs.pqm.Startup()
+
 	err := bs.setupMetrics()
 	if err != nil {
 		log.Errorf("failed to setup metrics: %s", err)
 	}
-
-	bs.sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), bs.meterProvider)
-	bs.pqm.Startup()
 
 	// bind the context and process.
 	// do it over here to avoid closing before all setup is done.
@@ -253,24 +253,20 @@ type Client struct {
 }
 
 type counters struct {
-	blocksRecvd      uint64
-	dupBlocksRecvd   uint64
-	dupDataRecvd     uint64
-	dataRecvd        uint64
-	messagesRecvd    uint64
-	discoverySuccess uint64
-	discoveryFailure uint64
+	blocksRecvd    uint64
+	dupBlocksRecvd uint64
+	dupDataRecvd   uint64
+	dataRecvd      uint64
+	messagesRecvd  uint64
 }
 
 type metrics struct {
 	// Async
-	blocksRecvd      asyncint64.Counter
-	dupBlocksRecvd   asyncint64.Counter
-	dupDataRecvd     asyncint64.Counter
-	dataRecvd        asyncint64.Counter
-	messagesRecvd    asyncint64.Counter
-	discoverySuccess asyncint64.Counter
-	discoveryFailure asyncint64.Counter
+	blocksRecvd    asyncint64.Counter
+	dupBlocksRecvd asyncint64.Counter
+	dupDataRecvd   asyncint64.Counter
+	dataRecvd      asyncint64.Counter
+	messagesRecvd  asyncint64.Counter
 }
 
 func (bs *Client) setupMetrics() error {
