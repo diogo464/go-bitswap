@@ -378,6 +378,7 @@ func (s *Session) run(ctx context.Context) {
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
 	discoveryComplete := false
 	discoveryStart := time.Now()
+	firstBlockReceived := false
 	for {
 		select {
 		case oper := <-s.incoming:
@@ -386,13 +387,16 @@ func (s *Session) run(ctx context.Context) {
 				// Received blocks
 				s.handleReceive(oper.keys)
 				if !discoveryComplete {
-					ttfb := time.Since(discoveryStart)
 					discoveryComplete = true
 					s.metrics.discoverySuccess.Add(context.TODO(), 1)
+				}
+				if !firstBlockReceived {
+					ttfb := time.Since(discoveryStart)
 					s.metrics.timeToFirstBlock.Record(context.TODO(), ttfb.Seconds())
 					s.metrics.timeToFirstBlockEv.Emit(&eventTimeToFirstBlock{
 						Time: ttfb.Seconds(),
 					})
+					firstBlockReceived = true
 				}
 			case opWant:
 				// Client wants blocks
