@@ -19,14 +19,10 @@ import (
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	logging "github.com/ipfs/go-log"
-	gometrics "github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 )
 
@@ -40,9 +36,6 @@ const provideWorkerMax = 6
 type Option func(*Server)
 
 type Server struct {
-	sentHistogram     gometrics.Histogram
-	sendTimeHistogram gometrics.Histogram
-
 	// the engine is the bit of logic that decides who to send which blocks to
 	engine *decision.Engine
 
@@ -54,7 +47,7 @@ type Server struct {
 
 	// Counters for various statistics
 	meterProvider metric.MeterProvider
-	metrics       *metrics
+	metrics       *bmetrics.ServerMetrics
 	counterLk     sync.Mutex
 	counters      Stat
 
@@ -79,12 +72,6 @@ type Server struct {
 	provideEnabled bool
 }
 
-type metrics struct {
-	// Async
-	blocksSent asyncint64.Counter
-	dataSent   asyncint64.Counter
-}
-
 func New(ctx context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Blockstore, options ...Option) *Server {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -97,8 +84,6 @@ func New(ctx context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Bl
 	}()
 
 	s := &Server{
-		sentHistogram:      bmetrics.SentHist(ctx),
-		sendTimeHistogram:  bmetrics.SendTimeHist(ctx),
 		taskWorkerCount:    defaults.BitswapTaskWorkerCount,
 		network:            network,
 		process:            px,
@@ -112,19 +97,25 @@ func New(ctx context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Bl
 		o(s)
 	}
 
+	if s.meterProvider == nil {
+		s.meterProvider = metric.NewNoopMeterProvider()
+	}
+
 	s.engine = decision.NewEngine(
 		ctx,
 		bstore,
 		network.ConnectionManager(),
 		network.Self(),
+		s.meterProvider,
 		s.engineOptions...,
 	)
 	s.engineOptions = nil
 
-	if s.meterProvider == nil {
-		s.meterProvider = metric.NewNoopMeterProvider()
+	smetrics, err := bmetrics.NewServerMetrics(s.meterProvider)
+	if err != nil {
+		log.Warnf("failed to create server metrics: %s", err)
 	}
-	s.setupMetrics()
+	s.metrics = smetrics
 
 	s.startWorkers(ctx, px)
 
@@ -243,53 +234,6 @@ func WithMeterProvider(provider metric.MeterProvider) Option {
 	}
 }
 
-func (bs *Server) setupMetrics() error {
-	var (
-		err error
-
-		blocksSent asyncint64.Counter
-		dataSent   asyncint64.Counter
-	)
-
-	m := bs.meterProvider.Meter("libp2p.io/bitswap/server")
-
-	if blocksSent, err = m.AsyncInt64().Counter(
-		"blocks_sent",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of blocks sent"),
-	); err != nil {
-		return err
-	}
-
-	if dataSent, err = m.AsyncInt64().Counter(
-		"data_sent",
-		instrument.WithUnit(unit.Bytes),
-		instrument.WithDescription("Total number of data bytes sent"),
-	); err != nil {
-		return err
-	}
-
-	m.RegisterCallback([]instrument.Asynchronous{
-		blocksSent,
-		dataSent,
-	}, func(ctx context.Context) {
-		stat, err := bs.Stat()
-		if err != nil {
-			log.Errorf("failed to get bitswap stats: %s", err)
-		}
-
-		blocksSent.Observe(ctx, int64(stat.BlocksSent))
-		dataSent.Observe(ctx, int64(stat.DataSent))
-	})
-
-	bs.metrics = &metrics{
-		blocksSent: blocksSent,
-		dataSent:   dataSent,
-	}
-
-	return nil
-}
-
 // WantlistForPeer returns the currently understood list of blocks requested by a
 // given peer.
 func (bs *Server) WantlistForPeer(p peer.ID) []cid.Cid {
@@ -349,7 +293,7 @@ func (bs *Server) taskWorker(ctx context.Context, id int) {
 				bs.sendBlocks(ctx, envelope)
 
 				dur := time.Since(start)
-				bs.sendTimeHistogram.Observe(dur.Seconds())
+				bs.metrics.SendTime.Record(ctx, dur.Seconds())
 
 			case <-ctx.Done():
 				return
@@ -422,9 +366,11 @@ func (bs *Server) sendBlocks(ctx context.Context, env *decision.Envelope) {
 	}
 	bs.counterLk.Lock()
 	bs.counters.BlocksSent += uint64(len(blocks))
+	bs.metrics.BlocksSent.Add(ctx, int64(len(blocks)))
 	bs.counters.DataSent += uint64(dataSent)
+	bs.metrics.DataSent.Record(ctx, int64(dataSent))
 	bs.counterLk.Unlock()
-	bs.sentHistogram.Observe(float64(env.Message.Size()))
+	bs.metrics.MessageDataSent.Record(ctx, int64(env.Message.Size()))
 	log.Debugw("sent message", "peer", env.Peer)
 }
 

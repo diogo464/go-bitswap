@@ -5,20 +5,19 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ipfs/go-bitswap/metrics"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	bstore "github.com/ipfs/go-ipfs-blockstore"
 	ipld "github.com/ipfs/go-ipld-format"
-	"github.com/ipfs/go-metrics-interface"
 )
 
 // blockstoreManager maintains a pool of workers that make requests to the blockstore.
 type blockstoreManager struct {
-	bs           bstore.Blockstore
-	workerCount  int
-	jobs         chan func()
-	pendingGauge metrics.Gauge
-	activeGauge  metrics.Gauge
+	bs          bstore.Blockstore
+	workerCount int
+	jobs        chan func()
+	decmetrics  *metrics.DecisionMetrics
 
 	workerWG sync.WaitGroup
 	stopChan chan struct{}
@@ -30,16 +29,14 @@ type blockstoreManager struct {
 func newBlockstoreManager(
 	bs bstore.Blockstore,
 	workerCount int,
-	pendingGauge metrics.Gauge,
-	activeGauge metrics.Gauge,
+	decmetrics *metrics.DecisionMetrics,
 ) *blockstoreManager {
 	return &blockstoreManager{
-		bs:           bs,
-		workerCount:  workerCount,
-		jobs:         make(chan func()),
-		pendingGauge: pendingGauge,
-		activeGauge:  activeGauge,
-		stopChan:     make(chan struct{}),
+		bs:          bs,
+		workerCount: workerCount,
+		jobs:        make(chan func()),
+		decmetrics:  decmetrics,
+		stopChan:    make(chan struct{}),
 	}
 }
 
@@ -64,10 +61,10 @@ func (bsm *blockstoreManager) worker() {
 		case <-bsm.stopChan:
 			return
 		case job := <-bsm.jobs:
-			bsm.pendingGauge.Dec()
-			bsm.activeGauge.Inc()
+			bsm.decmetrics.BlockStorePending.Add(context.Background(), -1)
+			bsm.decmetrics.BlockStoreActive.Add(context.Background(), 1)
 			job()
-			bsm.activeGauge.Dec()
+			bsm.decmetrics.BlockStoreActive.Add(context.Background(), -1)
 		}
 	}
 }
@@ -79,7 +76,7 @@ func (bsm *blockstoreManager) addJob(ctx context.Context, job func()) error {
 	case <-bsm.stopChan:
 		return fmt.Errorf("shutting down")
 	case bsm.jobs <- job:
-		bsm.pendingGauge.Inc()
+		bsm.decmetrics.BlockStorePending.Add(ctx, 1)
 		return nil
 	}
 }

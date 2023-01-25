@@ -14,6 +14,7 @@ import (
 	"github.com/ipfs/go-bitswap/internal/testutil"
 	message "github.com/ipfs/go-bitswap/message"
 	pb "github.com/ipfs/go-bitswap/message/pb"
+	"go.opentelemetry.io/otel/metric"
 
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -196,6 +197,7 @@ func newEngineForTesting(
 		bs,
 		peerTagger,
 		self,
+		metric.NewNoopMeterProvider(),
 		maxReplaceSize,
 		opts...,
 	)

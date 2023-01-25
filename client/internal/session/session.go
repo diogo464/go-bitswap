@@ -4,23 +4,19 @@ import (
 	"context"
 	"time"
 
-	"github.com/diogo464/telemetry"
 	"github.com/ipfs/go-bitswap/client/internal"
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
 	bsgetter "github.com/ipfs/go-bitswap/client/internal/getter"
 	notifications "github.com/ipfs/go-bitswap/client/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/client/internal/peermanager"
 	bssim "github.com/ipfs/go-bitswap/client/internal/sessioninterestmanager"
+	"github.com/ipfs/go-bitswap/metrics"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/syncfloat64"
-	"go.opentelemetry.io/otel/metric/instrument/syncint64"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 )
 
@@ -138,18 +134,11 @@ type Session struct {
 	self peer.ID
 
 	meterProvider metric.MeterProvider
-	metrics       *metrics
+	metrics       *metrics.SessionMetrics
 }
 
 type eventTimeToFirstBlock struct {
 	Time float64 `json:"time"`
-}
-
-type metrics struct {
-	discoverySuccess   syncint64.Counter
-	discoveryFailure   syncint64.Counter
-	timeToFirstBlock   syncfloat64.Histogram
-	timeToFirstBlockEv telemetry.EventEmitter
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -170,6 +159,11 @@ func New(
 	meterProvider metric.MeterProvider) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
+	sessionMetrics, err := metrics.NewSessionMetrics(meterProvider)
+	if err != nil {
+		log.Errorw("failed to create session metrics", zap.Error(err))
+	}
+
 	s := &Session{
 		sw:                  newSessionWants(broadcastLiveWantsLimit),
 		tickDelayReqs:       make(chan time.Duration),
@@ -189,67 +183,13 @@ func New(
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
 		meterProvider:       meterProvider,
+		metrics:             sessionMetrics,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
-	s.setupMetrics()
 
 	go s.run(ctx)
 
 	return s
-}
-
-func (s *Session) setupMetrics() error {
-	var (
-		err error = nil
-
-		discoverySuccess   syncint64.Counter
-		discoveryFailure   syncint64.Counter
-		timeToFirstBlock   syncfloat64.Histogram
-		timeToFirstBlockEv telemetry.EventEmitter
-	)
-
-	m := s.meterProvider.Meter("libp2p.io/bitswap/session")
-
-	if discoverySuccess, err = m.SyncInt64().Counter(
-		"discovery_success",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of times discovery succeeded"),
-	); err != nil {
-		return err
-	}
-
-	if discoveryFailure, err = m.SyncInt64().Counter(
-		"discovery_failure",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of times discovery failed"),
-	); err != nil {
-		return err
-	}
-
-	if timeToFirstBlock, err = m.SyncFloat64().Histogram(
-		"time_to_first_block",
-		instrument.WithUnit(unit.Unit("s")),
-		instrument.WithDescription("Time to first block"),
-	); err != nil {
-		return err
-	}
-
-	tmp := telemetry.DowncastMeterProvider(s.meterProvider)
-	tm := tmp.TelemetryMeter("libp2p.io/telemetry")
-	timeToFirstBlockEv = tm.Event(
-		"bitswap.time_to_first_block",
-		instrument.WithDescription("Time to first block"),
-		instrument.WithUnit(unit.Unit("s")),
-	)
-
-	s.metrics = &metrics{
-		discoverySuccess:   discoverySuccess,
-		discoveryFailure:   discoveryFailure,
-		timeToFirstBlock:   timeToFirstBlock,
-		timeToFirstBlockEv: timeToFirstBlockEv,
-	}
-
-	return nil
 }
 
 func (s *Session) ID() uint64 {
@@ -388,14 +328,11 @@ func (s *Session) run(ctx context.Context) {
 				s.handleReceive(oper.keys)
 				if !discoveryComplete {
 					discoveryComplete = true
-					s.metrics.discoverySuccess.Add(context.TODO(), 1)
+					s.metrics.DiscoverySuccess.Add(ctx, 1)
 				}
 				if !firstBlockReceived {
 					ttfb := time.Since(discoveryStart)
-					s.metrics.timeToFirstBlock.Record(context.TODO(), ttfb.Seconds())
-					s.metrics.timeToFirstBlockEv.Emit(&eventTimeToFirstBlock{
-						Time: ttfb.Seconds(),
-					})
+					s.metrics.TimeToFirstBlock.Record(ctx, ttfb.Milliseconds())
 					firstBlockReceived = true
 				}
 			case opWant:
@@ -419,7 +356,7 @@ func (s *Session) run(ctx context.Context) {
 			s.broadcast(ctx, nil)
 			if !discoveryComplete {
 				discoveryComplete = true
-				s.metrics.discoveryFailure.Add(context.TODO(), 1)
+				s.metrics.DiscoveryFailure.Add(ctx, 1)
 			}
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want

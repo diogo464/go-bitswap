@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/ipfs/go-bitswap/internal/testutil"
+	"github.com/ipfs/go-bitswap/metrics"
 	cid "github.com/ipfs/go-cid"
-	"github.com/ipfs/go-metrics-interface"
+	"go.opentelemetry.io/otel/metric"
 
 	blocks "github.com/ipfs/go-block-format"
 	ds "github.com/ipfs/go-datastore"
@@ -25,9 +26,8 @@ func newBlockstoreManagerForTesting(
 	bs blockstore.Blockstore,
 	workerCount int,
 ) *blockstoreManager {
-	testPendingBlocksGauge := metrics.NewCtx(ctx, "pending_block_tasks", "Total number of pending blockstore tasks").Gauge()
-	testActiveBlocksGauge := metrics.NewCtx(ctx, "active_block_tasks", "Total number of active blockstore tasks").Gauge()
-	bsm := newBlockstoreManager(bs, workerCount, testPendingBlocksGauge, testActiveBlocksGauge)
+	decisionMetrics, _ := metrics.NewDecisionMetrics(metric.NewNoopMeterProvider())
+	bsm := newBlockstoreManager(bs, workerCount, decisionMetrics)
 	bsm.start()
 	t.Cleanup(bsm.stop)
 	return bsm
