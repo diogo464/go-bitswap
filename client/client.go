@@ -12,9 +12,7 @@ import (
 	delay "github.com/ipfs/go-ipfs-delay"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/trace"
 
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
@@ -270,84 +268,26 @@ type metrics struct {
 }
 
 func (bs *Client) setupMetrics() error {
-	var (
-		err error
-
-		blocksReceived    asyncint64.Counter
-		dataReceived      asyncint64.Counter
-		dupBlocksReceived asyncint64.Counter
-		dupDataReceived   asyncint64.Counter
-		messagesReceived  asyncint64.Counter
-	)
-
-	m := bs.meterProvider.Meter("libp2p.io/bitswap/client")
-
-	if blocksReceived, err = m.AsyncInt64().Counter(
-		"blocks_received",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of received blocks"),
-	); err != nil {
+	clientMetrics, err := bmetrics.NewClientMetrics(bs.meterProvider)
+	if err != nil {
 		return err
 	}
 
-	if dataReceived, err = m.AsyncInt64().Counter(
-		"data_received",
-		instrument.WithUnit(unit.Bytes),
-		instrument.WithDescription("Total number of data bytes received"),
-	); err != nil {
-		return err
-	}
-
-	if dupBlocksReceived, err = m.AsyncInt64().Counter(
-		"dup_blocks_received",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of duplicate blocks received"),
-	); err != nil {
-		return err
-	}
-
-	if dupDataReceived, err = m.AsyncInt64().Counter(
-		"dup_data_received",
-		instrument.WithUnit(unit.Bytes),
-		instrument.WithDescription("Total number of duplicate data bytes received"),
-	); err != nil {
-		return err
-	}
-
-	if messagesReceived, err = m.AsyncInt64().Counter(
-		"messages_received",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of messages received"),
-	); err != nil {
-		return err
-	}
-
-	m.RegisterCallback([]instrument.Asynchronous{
-		blocksReceived,
-		dataReceived,
-		dupBlocksReceived,
-		dupDataReceived,
-		messagesReceived,
-	}, func(ctx context.Context) {
+	err = clientMetrics.RegisterCallback(func(ctx context.Context) {
 		stat, err := bs.Stat()
 		if err != nil {
 			log.Errorf("bitswap.Stat() failed", "error", err)
 			return
 		}
 
-		blocksReceived.Observe(ctx, int64(stat.BlocksReceived))
-		dataReceived.Observe(ctx, int64(stat.DataReceived))
-		dupBlocksReceived.Observe(ctx, int64(stat.DupBlksReceived))
-		dupDataReceived.Observe(ctx, int64(stat.DupDataReceived))
-		messagesReceived.Observe(ctx, int64(stat.MessagesReceived))
+		clientMetrics.BlocksReceived.Observe(ctx, int64(stat.BlocksReceived))
+		clientMetrics.DataReceived.Observe(ctx, int64(stat.DataReceived))
+		clientMetrics.DupBlocksReceived.Observe(ctx, int64(stat.DupBlksReceived))
+		clientMetrics.DupDataReceived.Observe(ctx, int64(stat.DupDataReceived))
+		clientMetrics.MessagesReceived.Observe(ctx, int64(stat.MessagesReceived))
 	})
-
-	bs.metrics = &metrics{
-		blocksRecvd:    blocksReceived,
-		dataRecvd:      dataReceived,
-		dupBlocksRecvd: dupBlocksReceived,
-		dupDataRecvd:   dupDataReceived,
-		messagesRecvd:  messagesReceived,
+	if err != nil {
+		return err
 	}
 
 	return nil

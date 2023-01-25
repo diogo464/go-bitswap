@@ -24,9 +24,7 @@ import (
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 )
 
@@ -244,47 +242,22 @@ func WithMeterProvider(provider metric.MeterProvider) Option {
 }
 
 func (bs *Server) setupMetrics() error {
-	var (
-		err error
-
-		blocksSent asyncint64.Counter
-		dataSent   asyncint64.Counter
-	)
-
-	m := bs.meterProvider.Meter("libp2p.io/bitswap/server")
-
-	if blocksSent, err = m.AsyncInt64().Counter(
-		"blocks_sent",
-		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("Total number of blocks sent"),
-	); err != nil {
+	serverMetrics, err := bmetrics.NewServerMetrics(bs.meterProvider)
+	if err != nil {
 		return err
 	}
 
-	if dataSent, err = m.AsyncInt64().Counter(
-		"data_sent",
-		instrument.WithUnit(unit.Bytes),
-		instrument.WithDescription("Total number of data bytes sent"),
-	); err != nil {
-		return err
-	}
-
-	m.RegisterCallback([]instrument.Asynchronous{
-		blocksSent,
-		dataSent,
-	}, func(ctx context.Context) {
+	err = serverMetrics.RegisterCallback(func(ctx context.Context) {
 		stat, err := bs.Stat()
 		if err != nil {
 			log.Errorf("failed to get bitswap stats: %s", err)
 		}
 
-		blocksSent.Observe(ctx, int64(stat.BlocksSent))
-		dataSent.Observe(ctx, int64(stat.DataSent))
+		serverMetrics.BlocksSent.Observe(ctx, int64(stat.BlocksSent))
+		serverMetrics.DataSent.Observe(ctx, int64(stat.DataSent))
 	})
-
-	bs.metrics = &metrics{
-		blocksSent: blocksSent,
-		dataSent:   dataSent,
+	if err != nil {
+		return err
 	}
 
 	return nil
