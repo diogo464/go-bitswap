@@ -12,7 +12,6 @@ import (
 	delay "github.com/ipfs/go-ipfs-delay"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
 	"go.opentelemetry.io/otel/trace"
 
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
@@ -36,7 +35,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	logging "github.com/ipfs/go-log"
-	gometrics "github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -161,8 +159,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		sim:                        sim,
 		notif:                      notif,
 		counters:                   new(counters),
-		dupMetric:                  bmetrics.DupHist(ctx),
-		allMetric:                  bmetrics.AllHist(ctx),
 		provSearchDelay:            defaults.ProvSearchDelay,
 		rebroadcastDelay:           delay.Fixed(time.Minute),
 		simulateDontHavesOnTimeout: true,
@@ -224,9 +220,7 @@ type Client struct {
 
 	// Metrics interface metrics
 	meterProvider metric.MeterProvider
-	metrics       *metrics
-	dupMetric     gometrics.Histogram
-	allMetric     gometrics.Histogram
+	metrics       *bmetrics.ClientMetrics
 
 	// External statistics interface
 	tracer tracer.Tracer
@@ -258,15 +252,6 @@ type counters struct {
 	messagesRecvd  uint64
 }
 
-type metrics struct {
-	// Async
-	blocksRecvd    asyncint64.Counter
-	dupBlocksRecvd asyncint64.Counter
-	dupDataRecvd   asyncint64.Counter
-	dataRecvd      asyncint64.Counter
-	messagesRecvd  asyncint64.Counter
-}
-
 func (bs *Client) setupMetrics() error {
 	clientMetrics, err := bmetrics.NewClientMetrics(bs.meterProvider)
 	if err != nil {
@@ -281,14 +266,14 @@ func (bs *Client) setupMetrics() error {
 		}
 
 		clientMetrics.BlocksReceived.Observe(ctx, int64(stat.BlocksReceived))
-		clientMetrics.DataReceived.Observe(ctx, int64(stat.DataReceived))
 		clientMetrics.DupBlocksReceived.Observe(ctx, int64(stat.DupBlksReceived))
-		clientMetrics.DupDataReceived.Observe(ctx, int64(stat.DupDataReceived))
 		clientMetrics.MessagesReceived.Observe(ctx, int64(stat.MessagesReceived))
 	})
 	if err != nil {
 		return err
 	}
+
+	bs.metrics = clientMetrics
 
 	return nil
 }
@@ -437,9 +422,9 @@ func (bs *Client) updateReceiveCounters(blocks []blocks.Block) {
 		has := blocksHas[i]
 
 		blkLen := len(b.RawData())
-		bs.allMetric.Observe(float64(blkLen))
+		bs.metrics.DataReceived.Record(context.Background(), int64(blkLen))
 		if has {
-			bs.dupMetric.Observe(float64(blkLen))
+			bs.metrics.DupDataReceived.Record(context.Background(), int64(blkLen))
 		}
 
 		c := bs.counters

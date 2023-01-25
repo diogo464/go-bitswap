@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/metric"
 
 	wl "github.com/ipfs/go-bitswap/client/wantlist"
 	"github.com/ipfs/go-bitswap/internal/defaults"
@@ -171,6 +172,8 @@ type Engine struct {
 
 	self peer.ID
 
+	metrics *bmetrics.DecisionMetrics
+
 	// metrics gauge for total pending tasks across all workers
 	pendingGauge metrics.Gauge
 
@@ -309,6 +312,7 @@ func NewEngine(
 	bs bstore.Blockstore,
 	peerTagger PeerTagger,
 	self peer.ID,
+	meterProvider metric.MeterProvider,
 	opts ...Option,
 ) *Engine {
 	return newEngine(
@@ -316,6 +320,7 @@ func NewEngine(
 		bs,
 		peerTagger,
 		self,
+		meterProvider,
 		maxBlockSizeReplaceHasWithBlock,
 		opts...,
 	)
@@ -326,9 +331,15 @@ func newEngine(
 	bs bstore.Blockstore,
 	peerTagger PeerTagger,
 	self peer.ID,
+	meterProvider metric.MeterProvider,
 	maxReplaceSize int,
 	opts ...Option,
 ) *Engine {
+	decisionMetrics, err := bmetrics.NewDecisionMetrics(meterProvider)
+	if err != nil {
+		log.Warnf("failed to create decision metrics: %s", err)
+	}
+
 	e := &Engine{
 		ledgerMap:                       make(map[peer.ID]*ledger),
 		scoreLedger:                     NewDefaultScoreLedger(),
@@ -343,8 +354,7 @@ func newEngine(
 		sendDontHaves:                   true,
 		self:                            self,
 		peerLedger:                      newPeerLedger(),
-		pendingGauge:                    bmetrics.PendingEngineGauge(ctx),
-		activeGauge:                     bmetrics.ActiveEngineGauge(ctx),
+		metrics:                         decisionMetrics,
 		targetMessageSize:               defaultTargetMessageSize,
 		tagQueued:                       fmt.Sprintf(tagFormat, "queued", uuid.New().String()),
 		tagUseful:                       fmt.Sprintf(tagFormat, "useful", uuid.New().String()),
@@ -354,7 +364,7 @@ func newEngine(
 		opt(e)
 	}
 
-	e.bsm = newBlockstoreManager(bs, e.bstoreWorkerCount, bmetrics.PendingBlocksGauge(ctx), bmetrics.ActiveBlocksGauge(ctx))
+	e.bsm = newBlockstoreManager(bs, e.bstoreWorkerCount, e.metrics)
 
 	// default peer task queue options
 	peerTaskQueueOpts := []peertaskqueue.Option{
@@ -373,20 +383,13 @@ func newEngine(
 
 	e.peerRequestQueue = peertaskqueue.New(peerTaskQueueOpts...)
 
-	return e
-}
-
-func (e *Engine) updateMetrics() {
-	e.metricsLock.Lock()
-	c := e.metricUpdateCounter
-	e.metricUpdateCounter++
-	e.metricsLock.Unlock()
-
-	if c%100 == 0 {
+	decisionMetrics.RegisterCallback(func(ctx context.Context) {
 		stats := e.peerRequestQueue.Stats()
-		e.activeGauge.Set(float64(stats.NumActive))
-		e.pendingGauge.Set(float64(stats.NumPending))
-	}
+		decisionMetrics.PeerQueueActive.Observe(ctx, int64(stats.NumActive))
+		decisionMetrics.PeerQueuePending.Observe(ctx, int64(stats.NumPending))
+	})
+
+	return e
 }
 
 // SetSendDontHaves indicates what to do when the engine receives a want-block
@@ -505,21 +508,18 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 	for {
 		// Pop some tasks off the request queue
 		p, nextTasks, pendingBytes := e.peerRequestQueue.PopTasks(e.targetMessageSize)
-		e.updateMetrics()
 		for len(nextTasks) == 0 {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-e.workSignal:
 				p, nextTasks, pendingBytes = e.peerRequestQueue.PopTasks(e.targetMessageSize)
-				e.updateMetrics()
 			case <-e.ticker.C:
 				// When a task is cancelled, the queue may be "frozen" for a
 				// period of time. We periodically "thaw" the queue to make
 				// sure it doesn't get stuck in a frozen state.
 				e.peerRequestQueue.ThawRound()
 				p, nextTasks, pendingBytes = e.peerRequestQueue.PopTasks(e.targetMessageSize)
-				e.updateMetrics()
 			}
 		}
 
@@ -764,7 +764,6 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 	// Push entries onto the request queue
 	if len(activeEntries) > 0 {
 		e.peerRequestQueue.PushTasks(p, activeEntries...)
-		e.updateMetrics()
 	}
 }
 
@@ -884,7 +883,6 @@ func (e *Engine) NotifyNewBlocks(blks []blocks.Block) {
 					SendDontHave: false,
 				},
 			})
-			e.updateMetrics()
 		}
 	}
 
