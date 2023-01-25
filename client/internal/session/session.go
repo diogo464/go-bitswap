@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/diogo464/telemetry"
 	"github.com/ipfs/go-bitswap/client/internal"
 	bsbpm "github.com/ipfs/go-bitswap/client/internal/blockpresencemanager"
 	bsgetter "github.com/ipfs/go-bitswap/client/internal/getter"
@@ -140,10 +141,15 @@ type Session struct {
 	metrics       *metrics
 }
 
+type eventTimeToFirstBlock struct {
+	Time float64 `json:"time"`
+}
+
 type metrics struct {
-	discoverySuccess syncint64.Counter
-	discoveryFailure syncint64.Counter
-	timeToFirstBlock syncfloat64.Histogram
+	discoverySuccess   syncint64.Counter
+	discoveryFailure   syncint64.Counter
+	timeToFirstBlock   syncfloat64.Histogram
+	timeToFirstBlockEv telemetry.EventEmitter
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -196,9 +202,10 @@ func (s *Session) setupMetrics() error {
 	var (
 		err error = nil
 
-		discoverySuccess syncint64.Counter
-		discoveryFailure syncint64.Counter
-		timeToFirstBlock syncfloat64.Histogram
+		discoverySuccess   syncint64.Counter
+		discoveryFailure   syncint64.Counter
+		timeToFirstBlock   syncfloat64.Histogram
+		timeToFirstBlockEv telemetry.EventEmitter
 	)
 
 	m := s.meterProvider.Meter("libp2p.io/bitswap/session")
@@ -227,10 +234,19 @@ func (s *Session) setupMetrics() error {
 		return err
 	}
 
+	tmp := telemetry.DowncastMeterProvider(s.meterProvider)
+	tm := tmp.TelemetryMeter("libp2p.io/telemetry")
+	timeToFirstBlockEv = tm.Event(
+		"bitswap.time_to_first_block",
+		instrument.WithDescription("Time to first block"),
+		instrument.WithUnit(unit.Unit("s")),
+	)
+
 	s.metrics = &metrics{
-		discoverySuccess: discoverySuccess,
-		discoveryFailure: discoveryFailure,
-		timeToFirstBlock: timeToFirstBlock,
+		discoverySuccess:   discoverySuccess,
+		discoveryFailure:   discoveryFailure,
+		timeToFirstBlock:   timeToFirstBlock,
+		timeToFirstBlockEv: timeToFirstBlockEv,
 	}
 
 	return nil
@@ -362,6 +378,7 @@ func (s *Session) run(ctx context.Context) {
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
 	discoveryComplete := false
 	discoveryStart := time.Now()
+	firstBlockReceived := false
 	for {
 		select {
 		case oper := <-s.incoming:
@@ -370,10 +387,16 @@ func (s *Session) run(ctx context.Context) {
 				// Received blocks
 				s.handleReceive(oper.keys)
 				if !discoveryComplete {
-					ttfb := time.Since(discoveryStart)
 					discoveryComplete = true
 					s.metrics.discoverySuccess.Add(context.TODO(), 1)
+				}
+				if !firstBlockReceived {
+					ttfb := time.Since(discoveryStart)
 					s.metrics.timeToFirstBlock.Record(context.TODO(), ttfb.Seconds())
+					s.metrics.timeToFirstBlockEv.Emit(&eventTimeToFirstBlock{
+						Time: ttfb.Seconds(),
+					})
+					firstBlockReceived = true
 				}
 			case opWant:
 				// Client wants blocks
