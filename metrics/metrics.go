@@ -138,6 +138,8 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}
 
 	return &ClientMetrics{
+		m: m,
+
 		DataReceived:    dataReceived,
 		DupDataReceived: dupDataReceived,
 
