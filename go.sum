@@ -72,6 +72,8 @@ github.com/diogo464/telemetry v0.0.0-20230125203808-2f6d563d8895 h1:aBrh6LdgFkpd
 github.com/diogo464/telemetry v0.0.0-20230125203808-2f6d563d8895/go.mod h1:btTo07XWD4knlzyR8BM5prlD2AQRtO9HwIQBhwwgVHg=
 github.com/diogo464/telemetry v0.0.0-20230126114716-5df6d8950178 h1:Wn8fxgSjEXnuKc1jm6eGmcH9qt9TGoEfAcPvUoeLDwQ=
 github.com/diogo464/telemetry v0.0.0-20230126114716-5df6d8950178/go.mod h1:btTo07XWD4knlzyR8BM5prlD2AQRtO9HwIQBhwwgVHg=
+github.com/diogo464/telemetry v0.0.0-20230126123658-2df710596e93 h1:1Az8AJkq/X5/k2oFoMkFuzKxKSFGyGErFTdvXsJv//A=
+github.com/diogo464/telemetry v0.0.0-20230126123658-2df710596e93/go.mod h1:btTo07XWD4knlzyR8BM5prlD2AQRtO9HwIQBhwwgVHg=
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
 github.com/elastic/gosigar v0.14.2 h1:Dg80n8cr90OZ7x+bAax/QjoW/XqTI11RmA79ZwIm9/4=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
