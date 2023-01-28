@@ -93,7 +93,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	m := meterProvider.Meter(ClientScope.Name, metric.WithInstrumentationVersion(ClientScope.Version), metric.WithSchemaURL(ClientScope.SchemaURL))
 
 	blocksReceived, err := m.AsyncInt64().Counter(
-		"blocks_received",
+		"bitswap.client.blocks_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of received blocks"),
 	)
@@ -102,7 +102,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}
 
 	dataReceived, err := m.SyncInt64().Histogram(
-		"data_received",
+		"bitswap.client.data_received",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of data bytes received"),
 	)
@@ -111,7 +111,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}
 
 	dupBlocksReceived, err := m.AsyncInt64().Counter(
-		"dup_blocks_received",
+		"bitswap.client.dup_blocks_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of duplicate blocks received"),
 	)
@@ -120,7 +120,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}
 
 	dupDataReceived, err := m.SyncInt64().Histogram(
-		"dup_data_received",
+		"bitswap.client.dup_data_received",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of duplicate data bytes received"),
 	)
@@ -129,7 +129,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}
 
 	messagesReceived, err := m.AsyncInt64().Counter(
-		"messages_received",
+		"bitswap.client.messages_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of messages received"),
 	)
@@ -169,7 +169,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 	m := meterProvider.Meter(ServerScope.Name, metric.WithInstrumentationVersion(ServerScope.Version), metric.WithSchemaURL(ServerScope.SchemaURL))
 
 	blocksSent, err := m.SyncInt64().Counter(
-		"blocks_sent",
+		"bitswap.server.blocks_sent",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of sent blocks"),
 	)
@@ -178,7 +178,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 	}
 
 	dataSent, err := m.SyncInt64().Histogram(
-		"data_sent",
+		"bitswap.server.data_sent",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of data bytes sent"),
 	)
@@ -187,7 +187,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 	}
 
 	messageDataSent, err := m.SyncInt64().Histogram(
-		"message_data_sent",
+		"bitswap.server.message_data_sent",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of payload bytes sent in messages"),
 	)
@@ -196,7 +196,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 	}
 
 	sendTime, err := m.SyncFloat64().Histogram(
-		"send_time",
+		"bitswap.server.send_time",
 		instrument.WithUnit(unit.Unit("s")),
 		instrument.WithDescription("Time to send a message"),
 	)
@@ -222,7 +222,7 @@ func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, err
 	m := meterProvider.Meter(SessionScope.Name, metric.WithInstrumentationVersion(SessionScope.Version), metric.WithSchemaURL(SessionScope.SchemaURL))
 
 	discoverySuccess, err := m.SyncInt64().Counter(
-		"discovery_success",
+		"bitswap.session.discovery_success",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of times discovery succeeded"),
 	)
@@ -231,7 +231,7 @@ func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, err
 	}
 
 	discoveryFailure, err := m.SyncInt64().Counter(
-		"discovery_failure",
+		"bitswap.session.discovery_failure",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of times discovery failed"),
 	)
@@ -240,7 +240,7 @@ func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, err
 	}
 
 	timeToFirstBlock, err := m.SyncInt64().Histogram(
-		"time_to_first_block",
+		"bitswap.session.time_to_first_block",
 		instrument.WithUnit(unit.Milliseconds),
 		instrument.WithDescription("Time to first block"),
 	)
@@ -271,7 +271,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 	m := meterProvider.Meter(DecisionScope.Name, metric.WithInstrumentationVersion(DecisionScope.Version), metric.WithSchemaURL(DecisionScope.SchemaURL))
 
 	blockStorePending, err := m.SyncInt64().UpDownCounter(
-		"blockstore_pending",
+		"bitswap.decision.blockstore_pending",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of pending blockstore tasks"),
 	)
@@ -280,7 +280,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 	}
 
 	blockStoreActive, err := m.SyncInt64().UpDownCounter(
-		"blockstore_active",
+		"bitswap.decision.blockstore_active",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of active blockstore tasks"),
 	)
@@ -289,7 +289,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 	}
 
 	peerQueueActive, err := m.AsyncInt64().Gauge(
-		"peer_queue_active",
+		"bitswap.decision.peer_queue_active",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of active peer queue tasks"),
 	)
@@ -298,7 +298,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 	}
 
 	peerQueuePending, err := m.AsyncInt64().Gauge(
-		"peer_queue_pending",
+		"bitswap.decision.peer_queue_pending",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of pending peer queue tasks"),
 	)
