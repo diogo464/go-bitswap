@@ -37,7 +37,7 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0 // indirect
-	github.com/diogo464/telemetry v0.0.0-20230126123658-2df710596e93 // indirect
+	github.com/diogo464/telemetry v0.0.0-20230130124721-5e7cee66e864 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
