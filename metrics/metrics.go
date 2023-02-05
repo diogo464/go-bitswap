@@ -5,9 +5,6 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
-	"go.opentelemetry.io/otel/metric/instrument/syncfloat64"
-	"go.opentelemetry.io/otel/metric/instrument/syncint64"
 	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	sdk_metric "go.opentelemetry.io/otel/sdk/metric"
@@ -52,19 +49,19 @@ var (
 	}
 
 	ViewTimeMetrics = sdk_metric.NewView(sdk_metric.Instrument{
-		Kind:  sdk_metric.InstrumentKindSyncHistogram,
+		Kind:  sdk_metric.InstrumentKindHistogram,
 		Unit:  unit.Unit("s"),
 		Scope: ServerScope,
 	}, streamTimeHistogram)
 
 	ViewClientBytesHistograms = sdk_metric.NewView(sdk_metric.Instrument{
-		Kind:  sdk_metric.InstrumentKindSyncHistogram,
+		Kind:  sdk_metric.InstrumentKindHistogram,
 		Unit:  unit.Bytes,
 		Scope: ClientScope,
 	}, streamBytesHistogram)
 
 	ViewServerBytesHistograms = sdk_metric.NewView(sdk_metric.Instrument{
-		Kind:  sdk_metric.InstrumentKindSyncHistogram,
+		Kind:  sdk_metric.InstrumentKindHistogram,
 		Unit:  unit.Bytes,
 		Scope: ServerScope,
 	}, streamBytesHistogram)
@@ -80,19 +77,19 @@ type ClientMetrics struct {
 	m metric.Meter
 
 	// Synchronous
-	DataReceived    syncint64.Histogram
-	DupDataReceived syncint64.Histogram
+	DataReceived    instrument.Int64Histogram
+	DupDataReceived instrument.Int64Histogram
 
 	// Asynchronous
-	BlocksReceived    asyncint64.Counter
-	DupBlocksReceived asyncint64.Counter
-	MessagesReceived  asyncint64.Counter
+	BlocksReceived    instrument.Int64ObservableCounter
+	DupBlocksReceived instrument.Int64ObservableCounter
+	MessagesReceived  instrument.Int64ObservableCounter
 }
 
 func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error) {
 	m := meterProvider.Meter(ClientScope.Name, metric.WithInstrumentationVersion(ClientScope.Version), metric.WithSchemaURL(ClientScope.SchemaURL))
 
-	blocksReceived, err := m.AsyncInt64().Counter(
+	blocksReceived, err := m.Int64ObservableCounter(
 		"bitswap.client.blocks_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of received blocks"),
@@ -101,7 +98,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 		return nil, err
 	}
 
-	dataReceived, err := m.SyncInt64().Histogram(
+	dataReceived, err := m.Int64Histogram(
 		"bitswap.client.data_received",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of data bytes received"),
@@ -110,7 +107,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 		return nil, err
 	}
 
-	dupBlocksReceived, err := m.AsyncInt64().Counter(
+	dupBlocksReceived, err := m.Int64ObservableCounter(
 		"bitswap.client.dup_blocks_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of duplicate blocks received"),
@@ -119,7 +116,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 		return nil, err
 	}
 
-	dupDataReceived, err := m.SyncInt64().Histogram(
+	dupDataReceived, err := m.Int64Histogram(
 		"bitswap.client.dup_data_received",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of duplicate data bytes received"),
@@ -128,7 +125,7 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 		return nil, err
 	}
 
-	messagesReceived, err := m.AsyncInt64().Counter(
+	messagesReceived, err := m.Int64ObservableCounter(
 		"bitswap.client.messages_received",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of messages received"),
@@ -149,26 +146,27 @@ func NewClientMetrics(meterProvider metric.MeterProvider) (*ClientMetrics, error
 	}, nil
 }
 
-func (m *ClientMetrics) RegisterCallback(cb func(context.Context)) error {
+func (m *ClientMetrics) RegisterCallback(cb func(context.Context, metric.Observer) error) error {
 	instruments := []instrument.Asynchronous{
 		m.BlocksReceived,
 		m.DupBlocksReceived,
 		m.MessagesReceived,
 	}
-	return m.m.RegisterCallback(instruments, cb)
+	_, err := m.m.RegisterCallback(cb, instruments...)
+	return err
 }
 
 type ServerMetrics struct {
-	BlocksSent      syncint64.Counter
-	DataSent        syncint64.Histogram
-	MessageDataSent syncint64.Histogram
-	SendTime        syncfloat64.Histogram
+	BlocksSent      instrument.Int64Counter
+	DataSent        instrument.Int64Histogram
+	MessageDataSent instrument.Int64Histogram
+	SendTime        instrument.Float64Histogram
 }
 
 func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error) {
 	m := meterProvider.Meter(ServerScope.Name, metric.WithInstrumentationVersion(ServerScope.Version), metric.WithSchemaURL(ServerScope.SchemaURL))
 
-	blocksSent, err := m.SyncInt64().Counter(
+	blocksSent, err := m.Int64Counter(
 		"bitswap.server.blocks_sent",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of sent blocks"),
@@ -177,7 +175,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 		return nil, err
 	}
 
-	dataSent, err := m.SyncInt64().Histogram(
+	dataSent, err := m.Int64Histogram(
 		"bitswap.server.data_sent",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of data bytes sent"),
@@ -186,7 +184,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 		return nil, err
 	}
 
-	messageDataSent, err := m.SyncInt64().Histogram(
+	messageDataSent, err := m.Int64Histogram(
 		"bitswap.server.message_data_sent",
 		instrument.WithUnit(unit.Bytes),
 		instrument.WithDescription("Number of payload bytes sent in messages"),
@@ -195,7 +193,7 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 		return nil, err
 	}
 
-	sendTime, err := m.SyncFloat64().Histogram(
+	sendTime, err := m.Float64Histogram(
 		"bitswap.server.send_time",
 		instrument.WithUnit(unit.Unit("s")),
 		instrument.WithDescription("Time to send a message"),
@@ -213,15 +211,15 @@ func NewServerMetrics(meterProvider metric.MeterProvider) (*ServerMetrics, error
 }
 
 type SessionMetrics struct {
-	DiscoverySuccess syncint64.Counter
-	DiscoveryFailure syncint64.Counter
-	TimeToFirstBlock syncint64.Histogram
+	DiscoverySuccess instrument.Int64Counter
+	DiscoveryFailure instrument.Int64Counter
+	TimeToFirstBlock instrument.Int64Histogram
 }
 
 func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, error) {
 	m := meterProvider.Meter(SessionScope.Name, metric.WithInstrumentationVersion(SessionScope.Version), metric.WithSchemaURL(SessionScope.SchemaURL))
 
-	discoverySuccess, err := m.SyncInt64().Counter(
+	discoverySuccess, err := m.Int64Counter(
 		"bitswap.session.discovery_success",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of times discovery succeeded"),
@@ -230,7 +228,7 @@ func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, err
 		return nil, err
 	}
 
-	discoveryFailure, err := m.SyncInt64().Counter(
+	discoveryFailure, err := m.Int64Counter(
 		"bitswap.session.discovery_failure",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of times discovery failed"),
@@ -239,7 +237,7 @@ func NewSessionMetrics(meterProvider metric.MeterProvider) (*SessionMetrics, err
 		return nil, err
 	}
 
-	timeToFirstBlock, err := m.SyncInt64().Histogram(
+	timeToFirstBlock, err := m.Int64Histogram(
 		"bitswap.session.time_to_first_block",
 		instrument.WithUnit(unit.Milliseconds),
 		instrument.WithDescription("Time to first block"),
@@ -259,18 +257,18 @@ type DecisionMetrics struct {
 	m metric.Meter
 
 	// Synchronous
-	BlockStorePending syncint64.UpDownCounter
-	BlockStoreActive  syncint64.UpDownCounter
+	BlockStorePending instrument.Int64UpDownCounter
+	BlockStoreActive  instrument.Int64UpDownCounter
 
 	// Asynchronous
-	PeerQueueActive  asyncint64.Gauge
-	PeerQueuePending asyncint64.Gauge
+	PeerQueueActive  instrument.Int64ObservableGauge
+	PeerQueuePending instrument.Int64ObservableGauge
 }
 
 func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, error) {
 	m := meterProvider.Meter(DecisionScope.Name, metric.WithInstrumentationVersion(DecisionScope.Version), metric.WithSchemaURL(DecisionScope.SchemaURL))
 
-	blockStorePending, err := m.SyncInt64().UpDownCounter(
+	blockStorePending, err := m.Int64UpDownCounter(
 		"bitswap.decision.blockstore_pending",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of pending blockstore tasks"),
@@ -279,7 +277,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 		return nil, err
 	}
 
-	blockStoreActive, err := m.SyncInt64().UpDownCounter(
+	blockStoreActive, err := m.Int64UpDownCounter(
 		"bitswap.decision.blockstore_active",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of active blockstore tasks"),
@@ -288,7 +286,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 		return nil, err
 	}
 
-	peerQueueActive, err := m.AsyncInt64().Gauge(
+	peerQueueActive, err := m.Int64ObservableGauge(
 		"bitswap.decision.peer_queue_active",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of active peer queue tasks"),
@@ -297,7 +295,7 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 		return nil, err
 	}
 
-	peerQueuePending, err := m.AsyncInt64().Gauge(
+	peerQueuePending, err := m.Int64ObservableGauge(
 		"bitswap.decision.peer_queue_pending",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of pending peer queue tasks"),
@@ -317,12 +315,13 @@ func NewDecisionMetrics(meterProvider metric.MeterProvider) (*DecisionMetrics, e
 	}, nil
 }
 
-func (m *DecisionMetrics) RegisterCallback(cb func(context.Context)) error {
+func (m *DecisionMetrics) RegisterCallback(cb func(context.Context, metric.Observer) error) error {
 	insts := []instrument.Asynchronous{
 		m.PeerQueueActive,
 		m.PeerQueuePending,
 	}
-	return m.m.RegisterCallback(insts, cb)
+	_, err := m.m.RegisterCallback(cb, insts...)
+	return err
 }
 
 // func PendingBlocksGauge(ctx context.Context) metrics.Gauge {

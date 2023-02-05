@@ -383,10 +383,11 @@ func newEngine(
 
 	e.peerRequestQueue = peertaskqueue.New(peerTaskQueueOpts...)
 
-	decisionMetrics.RegisterCallback(func(ctx context.Context) {
+	decisionMetrics.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
 		stats := e.peerRequestQueue.Stats()
-		decisionMetrics.PeerQueueActive.Observe(ctx, int64(stats.NumActive))
-		decisionMetrics.PeerQueuePending.Observe(ctx, int64(stats.NumPending))
+		obs.ObserveInt64(decisionMetrics.PeerQueueActive, int64(stats.NumActive))
+		obs.ObserveInt64(decisionMetrics.PeerQueuePending, int64(stats.NumPending))
+		return nil
 	})
 
 	return e

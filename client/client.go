@@ -258,16 +258,18 @@ func (bs *Client) setupMetrics() error {
 		return err
 	}
 
-	err = clientMetrics.RegisterCallback(func(ctx context.Context) {
+	err = clientMetrics.RegisterCallback(func(ctx context.Context, obs metric.Observer) error {
 		stat, err := bs.Stat()
 		if err != nil {
 			log.Errorf("bitswap.Stat() failed", "error", err)
-			return
+			return err
 		}
 
-		clientMetrics.BlocksReceived.Observe(ctx, int64(stat.BlocksReceived))
-		clientMetrics.DupBlocksReceived.Observe(ctx, int64(stat.DupBlksReceived))
-		clientMetrics.MessagesReceived.Observe(ctx, int64(stat.MessagesReceived))
+		obs.ObserveInt64(clientMetrics.BlocksReceived, int64(stat.BlocksReceived))
+		obs.ObserveInt64(clientMetrics.DupBlocksReceived, int64(stat.DupBlksReceived))
+		obs.ObserveInt64(clientMetrics.MessagesReceived, int64(stat.MessagesReceived))
+
+		return nil
 	})
 	if err != nil {
 		return err
